@@ -1,0 +1,98 @@
+name: Update Security Policy on Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  update-security-policy:
+    # Skip prereleases and drafts; only stable published releases should change support policy.
+    if: ${{ github.event.release.prerelease == false && github.event.release.draft == false }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout default branch using Silver Bot token
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          token: ${{ secrets.SILVER_BOT_TOKEN }}
+
+      - name: Update docs/SECURITY.md supported versions
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          release_tag = os.environ["RELEASE_TAG"]
+          match = re.search(r"(\d+)\.(\d+)", release_tag)
+          if not match:
+              raise SystemExit(f"Unable to extract major.minor from release tag: {release_tag}")
+
+          new_series = f"{match.group(1)}.{match.group(2)}.x"
+          security_md_path = Path("docs/SECURITY.md")
+          content = security_md_path.read_text(encoding="utf-8").splitlines()
+
+          row_regex = re.compile(r"^\|\s*(\d+\.\d+\.x)\s*\|\s*(✅|❌)\s*\|\s*$")
+          row_start = None
+          row_end = None
+          existing_series = []
+          existing_status = {}
+
+          for idx, line in enumerate(content):
+              row_match = row_regex.match(line)
+              if not row_match:
+                  continue
+              if row_start is None:
+                  row_start = idx
+              row_end = idx
+              series = row_match.group(1)
+              status = row_match.group(2)
+              existing_series.append(series)
+              existing_status[series] = status
+
+          if row_start is None or row_end is None:
+              raise SystemExit("No supported version rows found in docs/SECURITY.md")
+
+          combined = [new_series] + existing_series
+          deduped_series = []
+          seen = set()
+          for series in combined:
+              if series in seen:
+                  continue
+              seen.add(series)
+              deduped_series.append(series)
+
+          updated_rows = []
+          for series in deduped_series:
+              # New release lines are always marked supported; existing rows keep current status.
+              status = "✅" if series == new_series else existing_status.get(series, "✅")
+              updated_rows.append(f"| {series:<7} | {status} |")
+
+          content[row_start : row_end + 1] = updated_rows
+          security_md_path.write_text("\n".join(content) + "\n", encoding="utf-8")
+          PY
+
+      - name: Commit and push changes as Silver Bot
+        env:
+          BOT_NAME: ${{ vars.SILVER_BOT_NAME }}
+          BOT_EMAIL: ${{ vars.SILVER_BOT_EMAIL }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          TARGET_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git config user.name "${BOT_NAME:-Silver Bot}"
+          git config user.email "${BOT_EMAIL:-silver-bot@users.noreply.github.com}"
+
+          if git diff --quiet -- docs/SECURITY.md; then
+            echo "No updates required for docs/SECURITY.md"
+            exit 0
+          fi
+
+          git add docs/SECURITY.md
+          git commit -m "chore(security): update supported versions for ${RELEASE_TAG}"
+          git push origin "HEAD:${TARGET_BRANCH}"
