@@ -6,10 +6,10 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   update-security-policy:
-    # Skip prereleases and drafts; only stable published releases should change support policy.
     if: ${{ github.event.release.prerelease == false && github.event.release.draft == false }}
     runs-on: ubuntu-latest
 
@@ -70,7 +70,6 @@ jobs:
 
           updated_rows = []
           for series in deduped_series:
-              # New release lines are always marked supported; existing rows keep current status.
               status = "✅" if series == new_series else existing_status.get(series, "✅")
               updated_rows.append(f"| {series:<7} | {status} |")
 
@@ -78,21 +77,21 @@ jobs:
           security_md_path.write_text("\n".join(content) + "\n", encoding="utf-8")
           PY
 
-      - name: Commit and push changes as Silver Bot
-        env:
-          BOT_NAME: ${{ vars.SILVER_BOT_NAME }}
-          BOT_EMAIL: ${{ vars.SILVER_BOT_EMAIL }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          TARGET_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          git config user.name "${BOT_NAME:-silverbotlsf}"
-          git config user.email "${BOT_EMAIL:-silver-bot@openmail.lk}"
+      - name: Create Pull Request as Silver Bot
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.SILVER_BOT_TOKEN }}
+          commit-message: "chore(security): update supported versions for ${{ github.event.release.tag_name }}"
+          committer: "${{ vars.SILVER_BOT_NAME }} <${{ vars.SILVER_BOT_EMAIL }}>"
+          author: "${{ vars.SILVER_BOT_NAME }} <${{ vars.SILVER_BOT_EMAIL }}>"
+          branch: silver-bot/update-security-${{ github.event.release.tag_name }}
+          base: ${{ github.event.repository.default_branch }}
+          title: "chore(security): update supported versions for ${{ github.event.release.tag_name }}"
+          body: |
+            This PR automatically updates **docs/SECURITY.md** to reflect the supported versions for the new release.
 
-          if git diff --quiet -- docs/SECURITY.md; then
-            echo "No updates required for docs/SECURITY.md"
-            exit 0
-          fi
+            Release: `${{ github.event.release.tag_name }}`
 
-          git add docs/SECURITY.md
-          git commit -m "chore(security): update supported versions for ${RELEASE_TAG}"
-          git push origin "HEAD:${TARGET_BRANCH}"
+            Generated automatically by Silver Bot.
+          add-paths: |
+            docs/SECURITY.md
