@@ -85,8 +85,8 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           TARGET_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          git config user.name "${BOT_NAME:-Silver Bot}"
-          git config user.email "${BOT_EMAIL:-silver-bot@users.noreply.github.com}"
+          git config user.name "${BOT_NAME:-silverbotlsf}"
+          git config user.email "${BOT_EMAIL:-silver-bot@openmail.lk}"
 
           if git diff --quiet -- docs/SECURITY.md; then
             echo "No updates required for docs/SECURITY.md"
